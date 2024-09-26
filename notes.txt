@@ -1,0 +1,13 @@
+New test case running approach: 
+    - build and create docker container with user code one time
+    - loop over test cases and do:
+        -run our cpp program inside it with test case
+        - get result and compare it with our expected output
+        - measure the time of the run
+        - set time out to kill the container if TLE
+        - measure memory usage (Some how) and check if MLE
+        - if violates any Rule (WA || TLE || MLE || RTE)
+            - break the loop 
+            - update submission database by setting the enw status of submmission as (WA, TLE, etc)
+
+    - every thing passed update the submission database with dtstus AC

@@ -1,0 +1,28 @@
+{
+  "name": "codehorizon-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "./src/main.ts",
+  "scripts": {
+    "start": "nodemon ./src/main.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@types/amqplib": "^0.10.5",
+    "@types/axios": "^0.9.36",
+    "@types/dockerode": "^3.3.31",
+    "@types/dotenv": "^6.1.1",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.5.5",
+    "amqplib": "^0.10.4",
+    "axios": "^1.7.7",
+    "dockerode": "^4.0.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "nodemon": "^3.1.4",
+    "prisma": "^5.19.1",
+    "ts-node": "^10.9.2"
+  }
+}

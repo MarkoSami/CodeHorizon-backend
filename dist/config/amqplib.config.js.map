@@ -1,0 +1,1 @@
+{"version":3,"file":"amqplib.config.js","sourceRoot":"","sources":["../../src/config/amqplib.config.ts"],"names":[],"mappings":";;AAEA,MAAM,aAAa,GAAG;IACpB,OAAO,EAAE,IAAI;IACb,UAAU,EAAE,KAAK;IACjB,UAAU,EAAE,KAAK;CAElB,CAAA;AACD,MAAM,QAAQ,GAAG,OAAO,CAAC,GAAG,CAAC,QAAQ,CAAC;AAMtC,kBAAe;IACb,aAAa;IACb,QAAQ;CACT,CAAC"}
