@@ -4,9 +4,17 @@ import DockerService from "../services/docker.service";
 import dockerRunResult from "../interfaces/dockerRunResult";
 const dockerService = new DockerService();
 import Dockerode from "dockerode";
+import { join, resolve } from "path";
 const docker = new Dockerode();
 
 
+
+interface SubmissionMessage {
+    problemId: string;
+    language: string;
+    code: string;
+    submissionId: string;
+}
 
 
 export default class Utils {
@@ -26,21 +34,30 @@ export default class Utils {
         }
     }
 
-    public static createCallLine(codeParams: string[], functionName: string) {
-        let callLine = `${functionName}(`;
-        // add every parameter to the call line
+    public static createParamsLine(codeParams: string[]) {
+        let paramsLine = "";
+        // add every parameter to the params line
         codeParams.forEach((param, index) => {
-            callLine += `data["${param}"]`;
+            paramsLine += `data["input"]["${param}"]`;
             if (index < codeParams.length - 1) {
-                callLine += ", ";
+                paramsLine += ", ";
             }
         });
 
-        callLine += ");";
-        return callLine;
+        return paramsLine;
     }
 
-    public static async injectCode(path: string, callLine: string, code: string) {
+    public static createCallLine(codeParams: string[], functionName: string) {
+        let callLine = `${functionName}(`;
+
+        const paramsLine = this.createParamsLine(codeParams);
+        callLine += paramsLine;
+
+        callLine += ");";
+        return { callLine, paramsLine };
+    }
+
+    public static async injectCode(path: string, callLine: string, paramsLine: string, code: string, functionName: string) {
         let codeRunnerFile = await readFile(
             path,
             "utf8"
@@ -48,149 +65,139 @@ export default class Utils {
 
         codeRunnerFile = codeRunnerFile.replace("$&{FINJECT}&$", code);
         codeRunnerFile = codeRunnerFile.replace("$&{FCALL}&$", callLine);
+        codeRunnerFile = codeRunnerFile.replace("$&{FNAME}&$", functionName);
+        codeRunnerFile = codeRunnerFile.replace("$&{FPARAMS}&$", paramsLine);
 
         await writeFile("./languageRunners/cpp/runInstance.cpp", codeRunnerFile);
     }
 
-    public static async handleSubmissionMessage(message: any) {
+    public static async handleSubmissionMessage(message: SubmissionMessage) {
         // get problem info 
-        const meinService = new MainService();
-        const problem = await meinService.getProblem(message.problemId);
+        const mainService = new MainService();
+        const problem = await mainService.getProblem(message.problemId);
 
         // get test cases of problem 
-        const testCases = await meinService.getTestCases(message.problemId);
+        const testCases = await mainService.getTestCases(message.problemId);
 
         // create call line and use infro from problem  info 
-        const callLine = this.createCallLine(problem.data.parametersNames, problem.data.functionName);
+        const { callLine, paramsLine } = this.createCallLine(problem.data.parametersNames, problem.data.functionName);
+
+
 
         // inject code into the code runner instance file
-        await this.injectCode("./languageRunners/cpp/main.cpp", callLine, message.code);
+        await this.injectCode("./languageRunners/cpp/main.cpp", callLine, paramsLine, message.code, problem.data.functionName);
         // build and run container with constraints from test case ingfo and pass test case to it 
 
+        console.log("Building and running container");
+        const buildStartTime = performance.now();
+        // const buildOutput = await dockerService.buildDockerImage(join(__dirname, `../../languageRunners/cpp`));
+        // console.log("Build output", buildOutput);
 
-        const buildOutput = await dockerService.buildDockerImage("cpp");
-        console.log("Build output", buildOutput);
-
-        const { id } = await dockerService.createContainer("language-runner-cpp");
+        const { id } = await dockerService.createContainer("code-sandbox", {});
         console.log("Container created", id);
         const container = docker.getContainer(id);
         container.wait();
+        const buildEndTime = performance.now();
+        const totalTime = Math.abs(buildStartTime - buildEndTime);
+        console.log("Total time to build and create container: ", totalTime.toFixed(2));
 
-        console.log("TestCase", JSON.stringify(`{"testCase": ${JSON.stringify(testCases[0].input)}}`));
+        // Assuming the container is already created and running
+
+        const formattedTestCases = {
+            testCases: testCases
+        };
+        console.log("Number of test cases", testCases.length);
+        const JSONTestCases = JSON.stringify(formattedTestCases);
 
 
-        const startTesting = performance.now();
+        const compileStartTime = performance.now();
+        // Step 1: Compile the application
+        const compileExec = await container.exec({
+            Cmd: ['sh', '-c', 'g++ runInstance.cpp -o myapp'],
+            AttachStderr: true,
+            AttachStdout: true,
+        });
 
-        for (const testCase of testCases) {
-            const testCaseInput = { testCase: testCase["input"] };
-            const parsedTestCase = JSON.stringify(testCaseInput);
-            // console.log("Test case", parsedTestCase);
-            // const containerInfo = await container.inspect();
-            const exec = await container.exec({
-                Cmd: ["./myapp", parsedTestCase],
-                AttachStderr: true,
-                AttachStdout: true,
-            });
+        await new Promise((resolve, reject) => {
+            compileExec.start({ Tty: false, hijack: true }, (err, stream) => {
+                if (err) {
+                    console.error("Error starting compile exec:", err);
+                    reject(err);
+                }
 
-            await new Promise((resolve, reject) => {
-                exec.start({ Tty: false, hijack: true }, (err, stream) => {
-                    if (err) {
-                        console.error("Error starting exec:", err);
-                        reject(err);
-                    }
+                stream?.on('data', (data) => {
+                    console.log('Compile Output:', data.toString());
+                });
 
-                    stream?.on('data', (data) => {
-                        console.log('Output:', data.toString());
-                    });
-
-                    stream?.on('error', (err) => {
-                        console.error("Stream error:", err);
-                    });
-
-                    stream?.on('end', async () => {
-                        resolve("Done");
-                    });
+                stream?.on('end', () => {
+                    resolve("Done");
                 });
             });
+        });
 
-        };
-
-        const endtesting = performance.now();
-
-        console.log('Stream ended');
-        const startTime = performance.now();
-        await container.stop({ t: 0 });
-        await container.remove();
-        const endTime = performance.now();
-        const totalTIme = endTime - startTime;
-        console.log("Total time To Stop and remove container: ", totalTIme.toFixed(2));
-
-        const totalTestingTime = endtesting - startTesting;
-        console.log(`Total time To test ${testCases.length} test cases: `, totalTestingTime.toFixed(2));
+        const compileEndTime = performance.now();
+        const compileTime = compileEndTime - compileStartTime;
+        console.log("Compile time", compileTime.toFixed(2));
 
 
-        // console.log("Container Status:", containerInfo);
-        // console.log("Container info", containerInfo);
+        // Step 2: Run the application
+        const runExec = await container.exec({
+            Cmd: ['sh', '-c', `./myapp '${JSONTestCases}'`],
+            AttachStderr: true,
+            AttachStdout: true,
+        });
 
-        // console.log("Container is running", container.id);
-        // console.log(JSON.stringify(`{"testCase": ${JSON.stringify(testCases[0].input)}}`));
-        // const exec = await container.exec({
-        //     Cmd: ["./myapp", JSON.stringify(`{"testCase": ${JSON.stringify(testCases[0].input)}}`)],
-        //     AttachStdout: true,
-        //     AttachStderr: true,
-        // });
-        // console.log("Exec created", exec.id);
-        // const stream = await exec.start({ Tty: true });
+        const startExec = performance.now();
+        const result: { result: string, failedTestCaseIndex?: string } = await new Promise((resolve, reject) => {
+            runExec.start({ Tty: false, hijack: true }, (err, stream) => {
+                if (err) {
+                    console.error("Error starting run exec:", err);
+                    reject(err);
+                }
+                let stdout = '';
 
-        // console.log("Exec started", exec.id);
+                stream?.on('data', (data) => {
+                    stdout += data.toString();
+                    console.log('Run Output:', data.toString());
+                });
 
-        // let output = "";
-        // stream.on("data", (data) => {
-        //     output += data.toString();
-        // });
-        // stream.on("error", (error) => {
-        //     console.log("Error", error);
-        // });
-        // stream.on("end", async () => {
-        //     console.log("Output", output);
-        //     // const result = JSON.parse(output);
-        //     console.log("Result", output);
-        //     await container.stop();
-        //     console.log("Container stopped", container.id);
-        //     await container.remove();
-        //     console.log("Container removed", container.id);
-        // });
+                stream?.on('end', () => {
+                    const jsonOutput = this.extractJson(stdout);
+                    if (!jsonOutput) {
+                        reject(new Error('No valid JSON found in output.'));
+                        return;
+                    }
+                    try {
+                        const jsonData = JSON.parse(jsonOutput);
+                        resolve(jsonData);
+                    } catch (e) {
+                        reject(new Error(`Failed to parse JSON: ${e}`));
+                    }
+                });
+            });
+        });
+        console.log("Result", result);
+        const endExec = performance.now();
+        const execTime = endExec - startExec;
+        console.log("Exec time", execTime.toFixed(2));
 
-
-
-        // for (let i = 0; i < testCases.length; i++) {
-        //     const testCase = testCases[i];
-        //     console.log("Running test case", JSON.stringify(testCase.input));
-        //     const startTime = performance.now();
-
-        //     const endTime = performance.now();
-        //     const totalTIme = endTime - startTime;
-        // const actualOutput = JSON.parse(result as string);
-        // const expectedOutput = testCase.output;
-
-        // console.log("Actual Output", actualOutput);
-        // console.log("Expected Output", expectedOutput);
-
-        // const wrongAnswer = !this.deepEqual(actualOutput, expectedOutput);
-        // console.log("Wrong Answer", wrongAnswer);
-        // console.log("Total time");
-        // console.log("Done");
+        console.log("Total Time:", (compileTime + execTime).toFixed(2));
 
 
-        // };
+        await mainService.updateSubmissionStatus(message.submissionId, result.result);
+        console.log("Submission status updated");
+
+    };
 
 
-        // get the result of the run 
 
-        // update the status of the submission using the api of the main service
-        // done 
-
+    public static extractJson(stdout: string) {
+        // Match the last JSON object in the output
+        const match = stdout.match(/\{.*\}\s*$/s);
+        return match ? match[0] : null;
     }
+
+
 
 
     public static deepEqual(obj1: { [key: string]: any }, obj2: { [key: string]: any }): boolean {
@@ -237,6 +244,7 @@ export default class Utils {
 
         return true; // Objects are equal
     }
+
 
 
 }

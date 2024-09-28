@@ -1,4 +1,4 @@
-import Dockerode from "dockerode";
+import Dockerode, { Container } from "dockerode";
 import { join } from "path";
 import { dokcerBuildResult } from "../interfaces/dokcerBuildResult";
 import dockerRunResult from "../interfaces/dockerRunResult";
@@ -16,14 +16,17 @@ export default class DockerService {
     }
 
 
-    async buildDockerImage(language: string): Promise<dokcerBuildResult> {
+    async buildDockerImage(contextPath: string): Promise<dokcerBuildResult> {
+
+
+        console.log("Building Docker image ");
         return new Promise((resolve, reject) => {
             this.docker.buildImage(
                 {
-                    context: join(__dirname, `../../languageRunners/${language}`),
+                    context: contextPath,
                     src: ["Dockerfile", "runInstance.cpp"], // Ensure the file paths are correct
                 },
-                { t: `language-runner-${language}` }, // Tag the image
+                { t: `code-sandbox`, nocache: false }, // Tag the image
                 (err, stream) => {
                     if (err) {
                         console.error("Error initiating build:", err);
@@ -34,13 +37,6 @@ export default class DockerService {
 
                     // Process stream data (build logs)
                     stream?.on("data", (data) => {
-                        const log = this.handleDockerLog(data.toString());
-                        if (log.error) {
-                            console.log("Error building container:", log.errorDetail);
-                            return reject(new Error(log.errorDetail.message));
-                        }
-
-
 
                         buildOutput += data.toString();
                     });
@@ -59,6 +55,7 @@ export default class DockerService {
                         console.error("Stream error during build:", error);
                         reject(error);
                     });
+
                 }
             );
         });
@@ -67,11 +64,23 @@ export default class DockerService {
 
 
 
-    async createContainer(imageName: string) {
+    async createContainer(imageName: string, volumes: Object): Promise<Dockerode.Container> {
+        // Check if container already exists
+        if (await this.checkContainerExists(`${imageName}-container`)) {
+            console.log("Container already exists");
+            return this.docker.getContainer(`${imageName}-container`);
+        }
+
         const container = await this.docker.createContainer({
             Image: imageName,
             name: `${imageName}-container`,
             Tty: true,
+            HostConfig: {
+                Binds: [
+                    'D:\\CodeHorizon\\CodeHorizon-backend\\host_path:/container_path' // Correct format
+                ]
+
+            }
         });
 
         await container.start();
@@ -79,6 +88,20 @@ export default class DockerService {
     }
 
 
+    async checkContainerExists(containerName: string): Promise<boolean> {
+        try {
+            const containers = await this.docker.listContainers();
+            const exists = containers.some(container => container.Names.includes(`/${containerName}`));
+
+            if (exists) {
+                return true;
+            }
+            return false;
+        } catch (error) {
+            console.error('Error checking container:', error);
+            return false;
+        }
+    }
 
 
     async cleanupStoppedContainers() {

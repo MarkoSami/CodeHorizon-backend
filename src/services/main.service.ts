@@ -46,12 +46,12 @@ export default class MainService {
 
     }
 
-    async updateTestCaseStatus(testCaseId: string, status: string): Promise<any> {
+    async updateSubmissionStatus(submissionId: string, status: string): Promise<any> {
         if (!this.url) {
             throw new Error("Main service URL is not defined");
         }
 
-        const response = await axios.put(`${this.url}/testCases/${testCaseId}`, { status });
+        const response = await axios.patch(`${this.url}/submissions/${submissionId}`, { verdict: status });
         return response.data;
     }
 }
