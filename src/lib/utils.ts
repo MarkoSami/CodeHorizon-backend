@@ -118,22 +118,38 @@ export default class Utils {
             AttachStdout: true,
         });
 
-        await new Promise((resolve, reject) => {
+        const compilationResult = await new Promise((resolve, reject) => {
             compileExec.start({ Tty: false, hijack: true }, (err, stream) => {
                 if (err) {
                     console.error("Error starting compile exec:", err);
                     reject(err);
                 }
 
+                let compileOutput = '';
+
                 stream?.on('data', (data) => {
+                    compileOutput += data.toString();
                     console.log('Compile Output:', data.toString());
                 });
 
                 stream?.on('end', () => {
-                    resolve("Done");
+                    if (compileOutput.includes('error')) {
+                        reject(new Error('Compilation error detected.'));
+                    } else {
+                        resolve("Done");
+                    }
                 });
             });
+        }).catch(async (error) => {
+            console.error("Compilation error:", error);
+            await mainService.updateSubmissionStatus(message.submissionId, "CE");
+            console.log("Submission status updated");
+            return null;
         });
+
+        if (compilationResult !== "Done") {
+            return;
+        }
 
         const compileEndTime = performance.now();
         const compileTime = compileEndTime - compileStartTime;
@@ -148,7 +164,7 @@ export default class Utils {
         });
 
         const startExec = performance.now();
-        const result: { result: string, failedTestCaseIndex?: string } = await new Promise((resolve, reject) => {
+        const result = await new Promise<{ result: string, failedTestCaseIndex?: string }>((resolve, reject) => {
             runExec.start({ Tty: false, hijack: true }, (err, stream) => {
                 if (err) {
                     console.error("Error starting run exec:", err);
@@ -175,7 +191,16 @@ export default class Utils {
                     }
                 });
             });
+        }).catch(async (error) => {
+            console.error("Runtime error:", error);
+            await mainService.updateSubmissionStatus(message.submissionId, "RTE");
+            console.log("Submission status updated");
+            return null;
         });
+
+        if (!result) {
+            return;
+        }
         console.log("Result", result);
         const endExec = performance.now();
         const execTime = endExec - startExec;

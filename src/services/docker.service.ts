@@ -77,7 +77,7 @@ export default class DockerService {
             Tty: true,
             HostConfig: {
                 Binds: [
-                    'D:\\CodeHorizon\\CodeHorizon-backend\\host_path:/container_path' // Correct format
+                    'D:/CodeHorizon/CodeHorizon-backend/languageRunners/cpp/runInstance.cpp:/usr/src/app/runInstance.cpp' // Correct format
                 ]
 
             }
